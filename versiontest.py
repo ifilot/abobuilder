@@ -40,7 +40,7 @@ def get_version_versionpy():
     """
     pattern = re.compile(r'^__version__\s*=\s*\'(\d+\.\d+.\d+)\'\s*$')
     
-    f = open(os.path.join(ROOT, 'pypwdft', '_version.py'))
+    f = open(os.path.join(ROOT, 'abobuilder', '_version.py'))
     lines = f.readlines()
     for line in lines:
         match = re.match(pattern, line)
