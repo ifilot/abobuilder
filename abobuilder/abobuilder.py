@@ -241,7 +241,7 @@ class AboBuilder:
         # write nr_atoms
         f.write(len(nuclei).to_bytes(2, byteorder='little'))
         for atom in nuclei:
-            f.write(self.et.atomic_number_from_element(atom[1]).to_bytes(1, byteorder='little'))
+            f.write(atom[1].to_bytes(1, byteorder='little'))
             f.write(np.array(atom[0] * 0.529177, dtype=np.float32).tobytes())
 
         # write number of models
@@ -266,7 +266,7 @@ class AboBuilder:
             # write nr_atoms
             f.write(len(nuclei).to_bytes(2, byteorder='little'))
             for atom in nuclei:
-                f.write(self.et.atomic_number_from_element(atom[1]).to_bytes(1, byteorder='little'))
+                f.write(atom[1].to_bytes(1, byteorder='little'))
                 f.write(np.array(atom[0] * 0.529177, dtype=np.float32).tobytes())
 
             print('Writing MO #%02i' % i)
