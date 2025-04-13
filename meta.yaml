@@ -25,7 +25,7 @@ requirements:
     - numpy
     - pyqint
     - pytessel
-    - conda-forge::mendeleev
+    - mendeleev
 
 test:
   requires:
@@ -35,8 +35,8 @@ test:
     - pytest
     - pyqint
     - pytessel
-    - conda-forge::pyfftw
-    - conda-forge::mendeleev
+    - pyfftw
+    - mendeleev
   source_files:
     - tests/*.py
   commands:
