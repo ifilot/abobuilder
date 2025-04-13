@@ -21,7 +21,8 @@ class ElementTable:
         self._symbol_to_number = {symbol: i for i, symbol in enumerate(self._elements) if symbol}
 
     def atomic_number_from_element(self, symbol: str) -> int:
-        """Return atomic number given element symbol (case-insensitive)."""
+        if not isinstance(symbol, str):
+            raise TypeError(f"Expected a string for the element symbol, got {type(symbol).__name__}")
         return self._symbol_to_number.get(symbol.capitalize(), None)
 
     def element_from_atomic_number(self, number: int) -> str:

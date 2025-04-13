@@ -1,7 +1,7 @@
 import sys
 import os
-
-sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'abobuilder'))
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from abobuilder import AboBuilder
 from pyqint import MoleculeBuilder, HF, FosterBoys

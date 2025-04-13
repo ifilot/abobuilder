@@ -1,6 +1,6 @@
 from pyqint import PyQInt, Molecule
 from pytessel import PyTessel
-from element_table import ElementTable
+from abobuilder.element_table import ElementTable
 import numpy as np
 import os
 
