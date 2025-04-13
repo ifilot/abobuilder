@@ -58,7 +58,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: anaconda-windows-packages
-          path: C:\Miniconda\envs\test\conda-bld\win-64\abobuilder-*.tar.bz2
+          path: C:\Miniconda\envs\test\conda-bld\noarch\abobuilder-*.tar.bz2
 
   anaconda-publish:
     name: Publish Anaconda / Windows
