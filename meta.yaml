@@ -24,6 +24,7 @@ requirements:
     - numpy
     - pyqint
     - pytessel
+    - tqdm
 
 test:
   requires:
@@ -33,6 +34,7 @@ test:
     - pytest
     - pyqint
     - pytessel
+    - tqdm
   source_files:
     - tests/*.py
   commands:
