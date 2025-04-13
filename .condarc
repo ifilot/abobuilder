@@ -1,5 +1,0 @@
-channels:
-  - ifilot
-  - conda-forge
-  - defaults
-channel_priority: strict

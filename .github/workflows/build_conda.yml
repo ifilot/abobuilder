@@ -86,6 +86,14 @@ jobs:
           environment-file: environment.yml
           python-version: 3.8
           auto-activate-base: false
+      - name: Configure Conda channels
+        shell: bash -l {0}
+        run: |
+          conda config --remove channels defaults || true
+          conda config --add channels ifilot
+          conda config --add channels conda-forge
+          conda config --add channels defaults
+          conda config --set channel_priority strict
       - name: Retrieve packages
         uses: actions/download-artifact@v4
         with:

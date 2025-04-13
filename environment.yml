@@ -1,4 +1,8 @@
 name: abobuilder
+channels:
+  - ifilot
+  - conda-forge
+  - defaults
 dependencies:
   - numpy
   - pyqint

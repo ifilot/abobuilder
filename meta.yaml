@@ -18,7 +18,6 @@ requirements:
     - setuptools
     - numpy
 
-
   run:
     - python>=3.9
     - scipy
