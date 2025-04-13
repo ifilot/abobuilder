@@ -24,7 +24,6 @@ requirements:
     - numpy
     - pyqint
     - pytessel
-    - mendeleev
 
 test:
   requires:
@@ -34,8 +33,6 @@ test:
     - pytest
     - pyqint
     - pytessel
-    - pyfftw
-    - mendeleev
   source_files:
     - tests/*.py
   commands:

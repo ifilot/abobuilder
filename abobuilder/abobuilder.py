@@ -1,6 +1,6 @@
 from pyqint import PyQInt, Molecule
 from pytessel import PyTessel
-from mendeleev import element
+from element_table import ElementTable
 import numpy as np
 import os
 
@@ -23,6 +23,8 @@ class AboBuilder:
             '3s', '3px', '3py', '3pz', '3dx2', '3dy2', '3dz2', '3dxy', '3dxz', '3dyz',
             '4s', '4px', '4py', '4pz'
         ]
+
+        self.et = ElementTable()
 
     def build_abo_model(self, outfile, models, colors):
         """
@@ -119,9 +121,9 @@ class AboBuilder:
         f.write(len(nuclei).to_bytes(2, byteorder='little'))
         for i,atom in enumerate(nuclei):
             if overwrite_nuclei:
-                f.write(element(overwrite_nuclei[i]).atomic_number.to_bytes(1, byteorder='little'))
+                f.write(self.et.atomic_number_from_element(overwrite_nuclei[i]).to_bytes(1, byteorder='little'))
             else:
-                f.write(element(atom[1]).atomic_number.to_bytes(1, byteorder='little'))
+                f.write(self.et.atomic_number_from_element(atom[1]).to_bytes(1, byteorder='little'))
             f.write(np.array(atom[0], dtype=np.float32).tobytes())
 
         # write number of models
@@ -144,9 +146,9 @@ class AboBuilder:
             f.write(len(nuclei).to_bytes(2, byteorder='little'))
             for a,atom in enumerate(nuclei):
                 if overwrite_nuclei:
-                    f.write(element(overwrite_nuclei[a]).atomic_number.to_bytes(1, byteorder='little'))
+                    f.write(self.et.atomic_number_from_element(overwrite_nuclei[a]).to_bytes(1, byteorder='little'))
                 else:
-                    f.write(element(atom[1]).atomic_number.to_bytes(1, byteorder='little'))
+                    f.write(self.et.atomic_number_from_element(atom[1]).to_bytes(1, byteorder='little'))
                 f.write(np.array(atom[0], dtype=np.float32).tobytes())
 
             print('Writing MO #%02i' % (i+1))
@@ -239,7 +241,7 @@ class AboBuilder:
         # write nr_atoms
         f.write(len(nuclei).to_bytes(2, byteorder='little'))
         for atom in nuclei:
-            f.write(element(atom[1]).atomic_number.to_bytes(1, byteorder='little'))
+            f.write(self.et.atomic_number_from_element(atom[1]).to_bytes(1, byteorder='little'))
             f.write(np.array(atom[0] * 0.529177, dtype=np.float32).tobytes())
 
         # write number of models
@@ -264,7 +266,7 @@ class AboBuilder:
             # write nr_atoms
             f.write(len(nuclei).to_bytes(2, byteorder='little'))
             for atom in nuclei:
-                f.write(element(atom[1]).atomic_number.to_bytes(1, byteorder='little'))
+                f.write(self.et.atomic_number_from_element(atom[1]).to_bytes(1, byteorder='little'))
                 f.write(np.array(atom[0] * 0.529177, dtype=np.float32).tobytes())
 
             print('Writing MO #%02i' % i)

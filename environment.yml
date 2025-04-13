@@ -7,7 +7,6 @@ dependencies:
   - numpy
   - pyqint
   - pytessel
-  - mendeleev
   - conda-build
   - conda-verify
   - anaconda-client
