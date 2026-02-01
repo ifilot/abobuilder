@@ -11,22 +11,24 @@ def main():
     
     # CH4nstruct .abo file for the canonical orbitals of CH4
     if not os.path.exists('ch4.abo'):
-        AboBuilder().build_abo_hf('ch4.abo', 
+        AboBuilder().build_abo_hf_v1('ch4.abo', 
                                 res['nuclei'], 
                                 res['cgfs'], 
                                 res['orbc'], 
-                                res['orbe'])
+                                res['orbe'],
+                                nsamples=151)
 
     # perform Foster-Boys localization
     res_fb = FosterBoys(res).run()
 
     # Construct .abo file for the localized orbitals of CH4
     if not os.path.exists('ch4_fb.abo'):
-        AboBuilder().build_abo_hf('ch4_fb.abo', 
+        AboBuilder().build_abo_hf_v1('ch4_fb.abo', 
                                 res['nuclei'], 
                                 res_fb['cgfs'], 
                                 res_fb['orbc'], 
-                                res_fb['orbe'])
+                                res_fb['orbe'],
+                                nsamples=151)
 
 if __name__ == '__main__':
     main()
