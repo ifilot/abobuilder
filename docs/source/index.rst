@@ -30,3 +30,5 @@ scientific results into visually rich, depth-enabled 3D environments.
    :maxdepth: 2
    :caption: Contents:
 
+   usage
+   file_format
