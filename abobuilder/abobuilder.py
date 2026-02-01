@@ -186,7 +186,11 @@ class AboBuilder:
             )
 
         if isinstance(payload_stream, io.BytesIO):
-            f.write(self._compress_payload(payload_stream.getvalue()))
+            buffer_view = payload_stream.getbuffer()
+            try:
+                f.write(self._compress_payload(buffer_view))
+            finally:
+                buffer_view.release()
 
         f.close()
 
@@ -396,7 +400,11 @@ class AboBuilder:
                         print('    Writing negative lobe: %i vertices and %i facets' % (vertices_scaled.shape[0], indices.shape[0] / 3))
 
         if isinstance(payload_stream, io.BytesIO):
-            f.write(self._compress_payload(payload_stream.getvalue()))
+            buffer_view = payload_stream.getbuffer()
+            try:
+                f.write(self._compress_payload(buffer_view))
+            finally:
+                buffer_view.release()
 
         f.close()
 
@@ -583,7 +591,11 @@ class AboBuilder:
                     print('    Writing negative lobe: %i vertices and %i facets' % (vertices_scaled.shape[0], indices.shape[0] / 3))
 
         if isinstance(payload_stream, io.BytesIO):
-            f.write(self._compress_payload(payload_stream.getvalue()))
+            buffer_view = payload_stream.getbuffer()
+            try:
+                f.write(self._compress_payload(buffer_view))
+            finally:
+                buffer_view.release()
 
         f.close()
 
