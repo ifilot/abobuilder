@@ -1,10 +1,15 @@
 from pyqint import PyQInt, Molecule
 from pytessel import PyTessel
 from abobuilder.element_table import ElementTable
+import io
 import numpy as np
 import os
+import zstandard as zstd
 
 class AboBuilder:
+    _COMPRESSION_FLAG_BIT = 0x01
+    _ZSTD_COMPRESSION_LEVEL = 22
+
     def __init__(self):
         # set transparency
         self.alpha = 0.97
@@ -40,6 +45,13 @@ class AboBuilder:
         f.write(int(frame_idx).to_bytes(2, byteorder='little'))
         f.write(len(descriptor).to_bytes(2, byteorder='little'))
         f.write(bytearray(descriptor, encoding='utf8'))
+
+    def _should_compress_payload(self, flags):
+        return bool(flags & self._COMPRESSION_FLAG_BIT)
+
+    def _compress_payload(self, payload):
+        compressor = zstd.ZstdCompressor(level=self._ZSTD_COMPRESSION_LEVEL)
+        return compressor.compress(payload)
 
     def _octahedral_encode_normals(self, normals):
         norms = np.linalg.norm(normals, axis=1, keepdims=True)
@@ -128,7 +140,7 @@ class AboBuilder:
         print("Creating file: %s" % outfile)
         print("Size: %f MB" % (os.stat(outfile).st_size / (1024*1024)))
 
-    def build_abo_model_v1(self, outfile, models, colors, flags=0):
+    def build_abo_model_v1(self, outfile, models, colors, flags=0, compress=False):
         """
         Build version 1 ABOF file using octahedral-encoded normals.
         """
@@ -138,28 +150,33 @@ class AboBuilder:
         # build pytessel object
         pytessel = PyTessel()
 
+        if compress:
+            flags |= self._COMPRESSION_FLAG_BIT
+
         # build output file
         f = open(outfile, 'wb')
         self._write_file_header(f, version=1, flags=flags)
 
+        payload_stream = io.BytesIO() if self._should_compress_payload(flags) else f
+
         # write number of frames
-        f.write(int(1).to_bytes(2, byteorder='little'))
+        payload_stream.write(int(1).to_bytes(2, byteorder='little'))
 
         #
         # First write the bare geometry of the molecule
         #
 
-        self._write_frame_header(f, 1, 'Geometry')
+        self._write_frame_header(payload_stream, 1, 'Geometry')
 
         # write nr_atoms
-        f.write(int(0).to_bytes(2, byteorder='little'))
+        payload_stream.write(int(0).to_bytes(2, byteorder='little'))
 
         # write number of models
-        f.write(int(len(models)).to_bytes(2, byteorder='little'))
+        payload_stream.write(int(len(models)).to_bytes(2, byteorder='little'))
 
         for i,model in enumerate(models):
             self._write_model(
-                f,
+                payload_stream,
                 i,
                 colors[i],
                 model['vertices'],
@@ -167,6 +184,9 @@ class AboBuilder:
                 model['indices'],
                 normal_encoding="oct16",
             )
+
+        if isinstance(payload_stream, io.BytesIO):
+            f.write(self._compress_payload(payload_stream.getvalue()))
 
         f.close()
 
@@ -276,7 +296,7 @@ class AboBuilder:
         print("Creating file: %s" % outfile)
         print("Size: %f MB" % (os.stat(outfile).st_size / (1024*1024)))
 
-    def build_abo_orbs_v1(self, outfile, nuclei, orbs, isovalue=0.03, overwrite_nuclei = None, flags=0):
+    def build_abo_orbs_v1(self, outfile, nuclei, orbs, isovalue=0.03, overwrite_nuclei = None, flags=0, compress=False):
         """
         Build version 1 ABOF file using octahedral-encoded normals.
         """
@@ -286,53 +306,58 @@ class AboBuilder:
         # build pytessel object
         pytessel = PyTessel()
 
+        if compress:
+            flags |= self._COMPRESSION_FLAG_BIT
+
         # build output file
         f = open(outfile, 'wb')
         self._write_file_header(f, version=1, flags=flags)
 
+        payload_stream = io.BytesIO() if self._should_compress_payload(flags) else f
+
         # write number of frames
         nr_frames = len(orbs) + 1
-        f.write(nr_frames.to_bytes(2, byteorder='little'))
+        payload_stream.write(nr_frames.to_bytes(2, byteorder='little'))
 
         #
         # First write the bare geometry of the molecule
         #
 
-        self._write_frame_header(f, 1, 'Geometry')
+        self._write_frame_header(payload_stream, 1, 'Geometry')
 
         # write nr_atoms
-        f.write(len(nuclei).to_bytes(2, byteorder='little'))
+        payload_stream.write(len(nuclei).to_bytes(2, byteorder='little'))
         for i,atom in enumerate(nuclei):
             if overwrite_nuclei:
-                f.write(self.et.atomic_number_from_element(overwrite_nuclei[i]).to_bytes(1, byteorder='little'))
+                payload_stream.write(self.et.atomic_number_from_element(overwrite_nuclei[i]).to_bytes(1, byteorder='little'))
             else:
-                f.write(self.et.atomic_number_from_element(atom[1]).to_bytes(1, byteorder='little'))
-            f.write(np.array(atom[0], dtype=np.float32).tobytes())
+                payload_stream.write(self.et.atomic_number_from_element(atom[1]).to_bytes(1, byteorder='little'))
+            payload_stream.write(np.array(atom[0], dtype=np.float32).tobytes())
 
         # write number of models
-        f.write(int(0).to_bytes(1, byteorder='little'))
-        f.write(int(0).to_bytes(1, byteorder='little'))
+        payload_stream.write(int(0).to_bytes(1, byteorder='little'))
+        payload_stream.write(int(0).to_bytes(1, byteorder='little'))
 
         #
         # Write the geometry including the orbitals
         #
         for i,key in enumerate(orbs):
-            self._write_frame_header(f, i + 1, key)
+            self._write_frame_header(payload_stream, i + 1, key)
 
             # write nr_atoms
-            f.write(len(nuclei).to_bytes(2, byteorder='little'))
+            payload_stream.write(len(nuclei).to_bytes(2, byteorder='little'))
             for a,atom in enumerate(nuclei):
                 if overwrite_nuclei:
-                    f.write(self.et.atomic_number_from_element(overwrite_nuclei[a]).to_bytes(1, byteorder='little'))
+                    payload_stream.write(self.et.atomic_number_from_element(overwrite_nuclei[a]).to_bytes(1, byteorder='little'))
                 else:
-                    f.write(self.et.atomic_number_from_element(atom[1]).to_bytes(1, byteorder='little'))
-                f.write(np.array(atom[0], dtype=np.float32).tobytes())
+                    payload_stream.write(self.et.atomic_number_from_element(atom[1]).to_bytes(1, byteorder='little'))
+                payload_stream.write(np.array(atom[0], dtype=np.float32).tobytes())
 
             print('Writing MO #%02i' % (i+1))
 
             # write number of models
             nrorbs = len(orbs[key]['orbitals'])
-            f.write(int(nrorbs * 2.0).to_bytes(2, byteorder='little'))
+            payload_stream.write(int(nrorbs * 2.0).to_bytes(2, byteorder='little'))
             for j in range(0, nrorbs):
                 # grab basis functions
                 orb = orbs[key]['orbitals'][j]
@@ -356,7 +381,7 @@ class AboBuilder:
                     vertices_scaled = vertices * 0.529177
 
                     self._write_model(
-                        f,
+                        payload_stream,
                         j * 2 + k,
                         self.colors[k],
                         vertices_scaled,
@@ -369,6 +394,9 @@ class AboBuilder:
                         print('    Writing positive lobe: %i vertices and %i facets' % (vertices_scaled.shape[0], indices.shape[0] / 3))
                     else:
                         print('    Writing negative lobe: %i vertices and %i facets' % (vertices_scaled.shape[0], indices.shape[0] / 3))
+
+        if isinstance(payload_stream, io.BytesIO):
+            f.write(self._compress_payload(payload_stream.getvalue()))
 
         f.close()
 
@@ -467,7 +495,7 @@ class AboBuilder:
         print("Creating file: %s" % outfile)
         print("Size: %f MB" % (os.stat(outfile).st_size / (1024*1024)))
 
-    def build_abo_hf_v1(self, outfile, nuclei, cgfs, coeff, energies, isovalue=0.03, maxmo=-1, sz=5.0, nsamples=100, flags=0):
+    def build_abo_hf_v1(self, outfile, nuclei, cgfs, coeff, energies, isovalue=0.03, maxmo=-1, sz=5.0, nsamples=100, flags=0, compress=False):
         """
         Build version 1 ABOF file using octahedral-encoded normals.
         """
@@ -477,29 +505,34 @@ class AboBuilder:
         # build pytessel object
         pytessel = PyTessel()
 
+        if compress:
+            flags |= self._COMPRESSION_FLAG_BIT
+
         # build output file
         f = open(outfile, 'wb')
         self._write_file_header(f, version=1, flags=flags)
 
+        payload_stream = io.BytesIO() if self._should_compress_payload(flags) else f
+
         # write number of frames
         nr_frames = len(cgfs) + 1 if maxmo == -1 else maxmo + 1
-        f.write(nr_frames.to_bytes(2, byteorder='little'))
+        payload_stream.write(nr_frames.to_bytes(2, byteorder='little'))
 
         #
         # First write the bare geometry of the molecule
         #
 
-        self._write_frame_header(f, 1, 'Geometry')
+        self._write_frame_header(payload_stream, 1, 'Geometry')
 
         # write nr_atoms
-        f.write(len(nuclei).to_bytes(2, byteorder='little'))
+        payload_stream.write(len(nuclei).to_bytes(2, byteorder='little'))
         for atom in nuclei:
-            f.write(atom[1].to_bytes(1, byteorder='little'))
-            f.write(np.array(atom[0] * 0.529177, dtype=np.float32).tobytes())
+            payload_stream.write(atom[1].to_bytes(1, byteorder='little'))
+            payload_stream.write(np.array(atom[0] * 0.529177, dtype=np.float32).tobytes())
 
         # write number of models
-        f.write(int(0).to_bytes(1, byteorder='little'))
-        f.write(int(0).to_bytes(1, byteorder='little'))
+        payload_stream.write(int(0).to_bytes(1, byteorder='little'))
+        payload_stream.write(int(0).to_bytes(1, byteorder='little'))
 
         # calculate number of electrons
         nelec = np.sum([atom[1] for atom in nuclei])
@@ -509,18 +542,18 @@ class AboBuilder:
         #
         for i in range(1, nr_frames):
             descriptor = 'Molecular orbital %i\nEnergy: %.4f eV' % (i,energies[i-1])
-            self._write_frame_header(f, i + 1, descriptor)
+            self._write_frame_header(payload_stream, i + 1, descriptor)
 
             # write nr_atoms
-            f.write(len(nuclei).to_bytes(2, byteorder='little'))
+            payload_stream.write(len(nuclei).to_bytes(2, byteorder='little'))
             for atom in nuclei:
-                f.write(atom[1].to_bytes(1, byteorder='little'))
-                f.write(np.array(atom[0] * 0.529177, dtype=np.float32).tobytes())
+                payload_stream.write(atom[1].to_bytes(1, byteorder='little'))
+                payload_stream.write(np.array(atom[0] * 0.529177, dtype=np.float32).tobytes())
 
             print('Writing MO #%02i' % i)
 
             # write number of models
-            f.write(int(2).to_bytes(2, byteorder='little'))
+            payload_stream.write(int(2).to_bytes(2, byteorder='little'))
             for j in range(0, 2):
                 # build the pos and negative isosurfaces from the cubefiles
                 grid = integrator.build_rectgrid3d(-sz, sz, nsamples)
@@ -535,7 +568,7 @@ class AboBuilder:
                     color = np.array(self.colors[j+2])
 
                 self._write_model(
-                    f,
+                    payload_stream,
                     j,
                     color,
                     vertices_scaled,
@@ -548,6 +581,9 @@ class AboBuilder:
                     print('    Writing positive lobe: %i vertices and %i facets' % (vertices_scaled.shape[0], indices.shape[0] / 3))
                 else:
                     print('    Writing negative lobe: %i vertices and %i facets' % (vertices_scaled.shape[0], indices.shape[0] / 3))
+
+        if isinstance(payload_stream, io.BytesIO):
+            f.write(self._compress_payload(payload_stream.getvalue()))
 
         f.close()
 
