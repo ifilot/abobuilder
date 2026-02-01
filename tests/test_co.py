@@ -10,7 +10,7 @@ class TestAboOrbitals(unittest.TestCase):
     def test_unitcell_properties(self):
         # perform Hartree-Fock calculation of CO
         co = MoleculeBuilder().from_name('CO')
-        res = HF().rhf(co, basis='sto3g', verbose=True)
+        res = HF(co, basis='sto3g').rhf(verbose=True)
         
         # construct .abo file for the canonical orbitals of CO
         if not os.path.exists('co.abo'):
