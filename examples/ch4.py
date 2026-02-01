@@ -1,15 +1,13 @@
 import sys
 import os
 
-sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'abobuilder'))
-
 from abobuilder import AboBuilder
 from pyqint import MoleculeBuilder, HF, FosterBoys
 
 def main():
     # perform Hartree-Fock calculation of CH4
     ch4 = MoleculeBuilder().from_name('CH4')
-    res = HF().rhf(ch4, basis='sto3g', verbose=True)
+    res = HF(ch4, basis='sto3g').rhf(verbose=True)
     
     # CH4nstruct .abo file for the canonical orbitals of CH4
     if not os.path.exists('ch4.abo'):
