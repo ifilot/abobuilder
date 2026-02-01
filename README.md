@@ -1,9 +1,9 @@
 # ABO Builder
 
 **ABO Builder** is a Python package designed to build `.abo` files, which are
-used by the [Managlyph](https://www.managlyph.nl) software to generate
-stereoscopic visualizations, particularly for anaglyph (red/cyan) rendering of
-molecular or structural models.
+used by the [Managlyph](https://ifilot.github.io/managlyph/) software to
+generate stereoscopic visualizations, particularly for anaglyph (red/cyan)
+rendering of molecular or structural models.
 
 ## Purpose
 
@@ -25,10 +25,4 @@ You can install `abobuilder` using pip:
 
 ```bash
 pip install abobuilder
-```
-
-or via Anaconda
-
-```bash
-conda install -c ifilot abobuilder
 ```
