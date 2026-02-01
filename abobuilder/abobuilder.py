@@ -15,14 +15,18 @@ NucleusSpec = tuple[Vector3, Any]
 OrbitalCollection = Mapping[str, Mapping[str, Any]]
 
 class AboBuilder:
-    """Build ABO/ABOF files containing geometry and orbital mesh data."""
+    """
+    Build ABO/ABOF files containing geometry and orbital mesh data.
+    """
     # Bit flag to mark compressed payloads in ABOF v1 headers.
     _COMPRESSION_FLAG_BIT = 0x01
     # Zstandard compression level used for ABOF payloads.
     _ZSTD_COMPRESSION_LEVEL = 22
 
     def __init__(self) -> None:
-        """Initialize the builder with colors, orbital templates, and element table."""
+        """
+        Initialize the builder with colors, orbital templates, and element table.
+        """
         # Global alpha used for all orbital colors.
         self.alpha: float = 0.97
 
@@ -46,7 +50,9 @@ class AboBuilder:
         self.et: ElementTable = ElementTable()
 
     def _write_file_header(self, f: BinaryIO, version: Optional[int] = None, flags: int = 0) -> None:
-        """Write the ABOF header for the specified file format version."""
+        """
+        Write the "ABOF" header for the specified file format version.
+        """
         if version is None or version == 0:
             return
         if version != 1:
@@ -57,7 +63,9 @@ class AboBuilder:
         f.write(int(flags).to_bytes(1, byteorder='little'))
 
     def _write_frame_header(self, f: BinaryIO, frame_idx: int, descriptor: str) -> None:
-        """Write a frame header including the frame index and descriptor text."""
+        """
+        Write a frame header including the frame index and descriptor text.
+        """
         f.write(int(frame_idx).to_bytes(2, byteorder='little'))
         f.write(len(descriptor).to_bytes(2, byteorder='little'))
         f.write(bytearray(descriptor, encoding='utf8'))
@@ -67,12 +75,16 @@ class AboBuilder:
         return bool(flags & self._COMPRESSION_FLAG_BIT)
 
     def _compress_payload(self, payload: memoryview) -> bytes:
-        """Compress payload bytes with Zstandard using the configured level."""
+        """
+        Compress payload bytes with Zstandard using the configured level.
+        """
         compressor = zstd.ZstdCompressor(level=self._ZSTD_COMPRESSION_LEVEL)
         return compressor.compress(payload)
 
     def _octahedral_encode_normals(self, normals: np.ndarray) -> np.ndarray:
-        """Encode normal vectors into octahedral 16-bit representation."""
+        """
+        Encode normal vectors into octahedral 16-bit representation.
+        """
         # Normalize input normals to unit vectors.
         norms = np.linalg.norm(normals, axis=1, keepdims=True)
         norms = np.where(norms == 0, 1.0, norms)
@@ -98,7 +110,9 @@ class AboBuilder:
         indices: np.ndarray,
         normal_encoding: str = "float32",
     ) -> None:
-        """Write a single mesh model block (vertices, normals, indices) to the stream."""
+        """
+        Write a single mesh model block (vertices, normals, indices) to the stream.
+        """
         f.write(int(model_idx).to_bytes(2, byteorder='little'))
         f.write(np.array(color).tobytes())
         f.write(vertices.shape[0].to_bytes(4, byteorder='little'))
@@ -132,7 +146,9 @@ class AboBuilder:
         models: Sequence[ModelData],
         colors: Sequence[np.ndarray],
     ) -> None:
-        """Build a legacy ABO model file (v0) with provided mesh data."""
+        """
+        Build a legacy ABO model file (v0) with provided mesh data.
+        """
         self.build_abo_model_v0(outfile, models, colors)
 
     def build_abo_model_v0(

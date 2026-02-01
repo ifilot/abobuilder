@@ -16,7 +16,8 @@ def main():
                                 res['cgfs'], 
                                 res['orbc'], 
                                 res['orbe'],
-                                nsamples=151)
+                                nsamples=51,
+                                compress=True)
 
     # perform Foster-Boys localization
     res_fb = FosterBoys(res).run()
@@ -28,7 +29,8 @@ def main():
                                 res_fb['cgfs'], 
                                 res_fb['orbc'], 
                                 res_fb['orbe'],
-                                nsamples=151)
+                                nsamples=51,
+                                compress=True)
 
 if __name__ == '__main__':
     main()

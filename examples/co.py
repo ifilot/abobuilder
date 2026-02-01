@@ -13,22 +13,26 @@ def main():
     
     # construct .abo file for the canonical orbitals of CO
     if not os.path.exists('co.abo'):
-        AboBuilder().build_abo_hf('co.abo', 
+        AboBuilder().build_abo_hf_v1('co.abo', 
                                 res['nuclei'], 
                                 res['cgfs'], 
                                 res['orbc'], 
-                                res['orbe'])
+                                res['orbe'],
+                                nsamples=51,
+                                compress=True)
 
     # perform Foster-Boys localization
     res_fb = FosterBoys(res).run()
 
     # construct .abo file for the localized orbitals of CO
     if not os.path.exists('co_fb.abo'):
-        AboBuilder().build_abo_hf('co_fb.abo', 
+        AboBuilder().build_abo_hf_v1('co_fb.abo', 
                                 res['nuclei'], 
                                 res_fb['cgfs'], 
                                 res_fb['orbc'], 
-                                res_fb['orbe'])
+                                res_fb['orbe'],
+                                nsamples=51,
+                                compress=True)
 
 if __name__ == '__main__':
     main()
