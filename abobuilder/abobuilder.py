@@ -145,17 +145,19 @@ class AboBuilder:
         outfile: os.PathLike[str] | str,
         models: Sequence[ModelData],
         colors: Sequence[np.ndarray],
+        geometry_descriptor: str = "Geometry",
     ) -> None:
         """
         Build a legacy ABO model file (v0) with provided mesh data.
         """
-        self.build_abo_model_v0(outfile, models, colors)
+        self.build_abo_model_v0(outfile, models, colors, geometry_descriptor=geometry_descriptor)
 
     def build_abo_model_v0(
         self,
         outfile: os.PathLike[str] | str,
         models: Sequence[ModelData],
         colors: Sequence[np.ndarray],
+        geometry_descriptor: str = "Geometry",
     ) -> None:
         """
         Build managlyph atom/bonds/orbitals file from raw model data.
@@ -164,6 +166,7 @@ class AboBuilder:
             outfile: Destination file path.
             models: Iterable of mesh dictionaries with vertices, normals, indices arrays.
             colors: RGBA colors for each model.
+            geometry_descriptor: Descriptor text for the initial geometry frame.
         """
         # Wavefunction integrator required by interface (unused for raw models).
         integrator = PyQInt()
@@ -181,7 +184,7 @@ class AboBuilder:
         # First write the bare geometry of the molecule
         #
 
-        self._write_frame_header(f, 1, 'Geometry')
+        self._write_frame_header(f, 1, geometry_descriptor)
 
         # write nr_atoms
         f.write(int(0).to_bytes(2, byteorder='little'))
@@ -212,6 +215,7 @@ class AboBuilder:
         outfile: os.PathLike[str] | str,
         models: Sequence[ModelData],
         colors: Sequence[np.ndarray],
+        geometry_descriptor: str = "Geometry",
         flags: int = 0,
         compress: bool = False,
     ) -> None:
@@ -222,6 +226,7 @@ class AboBuilder:
             outfile: Destination file path.
             models: Iterable of mesh dictionaries with vertices, normals, indices arrays.
             colors: RGBA colors for each model.
+            geometry_descriptor: Descriptor text for the initial geometry frame.
             flags: ABOF header flags.
             compress: Enable payload compression with Zstandard.
         """
@@ -248,7 +253,7 @@ class AboBuilder:
         # First write the bare geometry of the molecule
         #
 
-        self._write_frame_header(payload_stream, 1, 'Geometry')
+        self._write_frame_header(payload_stream, 1, geometry_descriptor)
 
         # write nr_atoms
         payload_stream.write(int(0).to_bytes(2, byteorder='little'))
@@ -288,9 +293,17 @@ class AboBuilder:
         orbs: OrbitalCollection,
         isovalue: float = 0.03,
         overwrite_nuclei: Optional[Sequence[str]] = None,
+        geometry_descriptor: str = "Geometry",
     ) -> None:
         """Build a legacy ABO orbital file (v0) from orbital data."""
-        self.build_abo_orbs_v0(outfile, nuclei, orbs, isovalue=isovalue, overwrite_nuclei=overwrite_nuclei)
+        self.build_abo_orbs_v0(
+            outfile,
+            nuclei,
+            orbs,
+            isovalue=isovalue,
+            overwrite_nuclei=overwrite_nuclei,
+            geometry_descriptor=geometry_descriptor,
+        )
 
     def build_abo_orbs_v0(
         self,
@@ -299,6 +312,7 @@ class AboBuilder:
         orbs: OrbitalCollection,
         isovalue: float = 0.03,
         overwrite_nuclei: Optional[Sequence[str]] = None,
+        geometry_descriptor: str = "Geometry",
     ) -> None:
         """
         Build managlyph atom/bonds/orbitals file from previous HF calculation.
@@ -309,6 +323,7 @@ class AboBuilder:
             orbs: Orbital data including orbitals and coefficients.
             isovalue: Isosurface value for marching cubes.
             overwrite_nuclei: Optional element symbols to override nuclei labels.
+            geometry_descriptor: Descriptor text for the initial geometry frame.
         """
         # Wavefunction integrator used to generate orbital scalar fields.
         integrator = PyQInt()
@@ -327,7 +342,7 @@ class AboBuilder:
         # First write the bare geometry of the molecule
         #
 
-        self._write_frame_header(f, 1, 'Geometry')
+        self._write_frame_header(f, 1, geometry_descriptor)
 
         # write nr_atoms
         f.write(len(nuclei).to_bytes(2, byteorder='little'))
@@ -421,6 +436,7 @@ class AboBuilder:
         orbs: OrbitalCollection,
         isovalue: float = 0.03,
         overwrite_nuclei: Optional[Sequence[str]] = None,
+        geometry_descriptor: str = "Geometry",
         flags: int = 0,
         compress: bool = False,
     ) -> None:
@@ -433,6 +449,7 @@ class AboBuilder:
             orbs: Orbital data including orbitals and coefficients.
             isovalue: Isosurface value for marching cubes.
             overwrite_nuclei: Optional element symbols to override nuclei labels.
+            geometry_descriptor: Descriptor text for the initial geometry frame.
             flags: ABOF header flags.
             compress: Enable payload compression with Zstandard.
         """
@@ -460,7 +477,7 @@ class AboBuilder:
         # First write the bare geometry of the molecule
         #
 
-        self._write_frame_header(payload_stream, 1, 'Geometry')
+        self._write_frame_header(payload_stream, 1, geometry_descriptor)
 
         # write nr_atoms
         payload_stream.write(len(nuclei).to_bytes(2, byteorder='little'))
@@ -566,9 +583,21 @@ class AboBuilder:
         maxmo: int = -1,
         sz: float = 5.0,
         nsamples: int = 100,
+        geometry_descriptor: str = "Geometry",
     ) -> None:
         """Build a legacy ABO Hartree-Fock file (v0) from HF results."""
-        self.build_abo_hf_v0(outfile, nuclei, cgfs, coeff, energies, isovalue=isovalue, maxmo=maxmo, sz=sz, nsamples=nsamples)
+        self.build_abo_hf_v0(
+            outfile,
+            nuclei,
+            cgfs,
+            coeff,
+            energies,
+            isovalue=isovalue,
+            maxmo=maxmo,
+            sz=sz,
+            nsamples=nsamples,
+            geometry_descriptor=geometry_descriptor,
+        )
 
     def build_abo_hf_v0(
         self,
@@ -581,6 +610,7 @@ class AboBuilder:
         maxmo: int = -1,
         sz: float = 5.0,
         nsamples: int = 100,
+        geometry_descriptor: str = "Geometry",
     ) -> None:
         """
         Build managlyph atom/bonds/orbitals file from
@@ -596,6 +626,7 @@ class AboBuilder:
             maxmo: Limit number of molecular orbitals (-1 for all).
             sz: Half-length of the sampling cube in Bohr.
             nsamples: Samples per axis for the grid.
+            geometry_descriptor: Descriptor text for the initial geometry frame.
         """
         # Wavefunction integrator used to generate orbital scalar fields.
         integrator = PyQInt()
@@ -614,7 +645,7 @@ class AboBuilder:
         # First write the bare geometry of the molecule
         #
 
-        self._write_frame_header(f, 1, 'Geometry')
+        self._write_frame_header(f, 1, geometry_descriptor)
 
         # write nr_atoms
         f.write(len(nuclei).to_bytes(2, byteorder='little'))
@@ -696,6 +727,7 @@ class AboBuilder:
         maxmo: int = -1,
         sz: float = 5.0,
         nsamples: int = 100,
+        geometry_descriptor: str = "Geometry",
         flags: int = 0,
         compress: bool = False,
     ) -> None:
@@ -712,6 +744,7 @@ class AboBuilder:
             maxmo: Limit number of molecular orbitals (-1 for all).
             sz: Half-length of the sampling cube in Bohr.
             nsamples: Samples per axis for the grid.
+            geometry_descriptor: Descriptor text for the initial geometry frame.
             flags: ABOF header flags.
             compress: Enable payload compression with Zstandard.
         """
@@ -739,7 +772,7 @@ class AboBuilder:
         # First write the bare geometry of the molecule
         #
 
-        self._write_frame_header(payload_stream, 1, 'Geometry')
+        self._write_frame_header(payload_stream, 1, geometry_descriptor)
 
         # write nr_atoms
         payload_stream.write(len(nuclei).to_bytes(2, byteorder='little'))
