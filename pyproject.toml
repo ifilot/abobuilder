@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "abobuilder"
-version = "0.2.1"
+version = "0.3.0"
 authors = [
   { name="Ivo Filot", email="i.a.w.filot@tue.nl" }
 ]
