@@ -16,7 +16,7 @@ Managlyph viewer.
 
 - Build `.abo` files from electronic structure calculations
 - Automatically include atomic and orbital data
-- Set colors, transparency, and styling for each element
+- Configure occupied/unoccupied orbital colors and styling
 - Export `.abo` packages ready for use in Managlyph
 
 ## Installation

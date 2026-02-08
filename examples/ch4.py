@@ -24,7 +24,7 @@ def main():
                                 res['cgfs'], 
                                 res['orbc'], 
                                 res['orbe'],
-                                nsamples=51,
+                                nsamples=71,
                                 compress=True,
                                 geometry_descriptor=desc)
 
@@ -47,7 +47,7 @@ def main():
                                 res_fb['cgfs'], 
                                 res_fb['orbc'], 
                                 res_fb['orbe'],
-                                nsamples=51,
+                                nsamples=71,
                                 compress=True,
                                 geometry_descriptor=desc)
 

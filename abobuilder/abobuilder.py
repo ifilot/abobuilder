@@ -7,6 +7,7 @@ from typing import Any, BinaryIO, Mapping, Optional, Sequence
 import io
 import numpy as np
 import os
+from stl import mesh as stl_mesh
 import zstandard as zstd
 
 Vector3 = Sequence[float]
@@ -23,20 +24,35 @@ class AboBuilder:
     # Zstandard compression level used for ABOF payloads.
     _ZSTD_COMPRESSION_LEVEL = 22
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        occupied_colors: Optional[Sequence[Sequence[float]]] = None,
+        unoccupied_colors: Optional[Sequence[Sequence[float]]] = None,
+    ) -> None:
         """
         Initialize the builder with colors, orbital templates, and element table.
+
+        Args:
+            occupied_colors: Optional RGBA/RGB colors for occupied orbital lobes.
+                Provide two colors (positive and negative lobe).
+            unoccupied_colors: Optional RGBA/RGB colors for unoccupied orbital lobes.
+                Provide two colors (positive and negative lobe).
         """
         # Global alpha used for all orbital colors.
         self.alpha: float = 0.97
 
-        # RGBA colors for occupied/virtual orbital lobes.
-        self.colors: list[np.ndarray] = [
+        default_colors = [
             np.array([0.592, 0.796, 0.369, self.alpha], dtype=np.float32),
             np.array([0.831, 0.322, 0.604, self.alpha], dtype=np.float32),
             np.array([1.000, 0.612, 0.000, self.alpha], dtype=np.float32),
             np.array([0.400, 0.831, 0.706, self.alpha], dtype=np.float32)
         ]
+
+        self.colors: list[np.ndarray] = self._build_orbital_colors(
+            occupied_colors,
+            unoccupied_colors,
+            default_colors,
+        )
 
         # Orbital label template used to map basis functions to CGFs.
         self.orbtemplate: list[str] = [
@@ -48,6 +64,57 @@ class AboBuilder:
 
         # Element table used for symbol -> atomic number conversions.
         self.et: ElementTable = ElementTable()
+
+    def _normalize_color(self, color: Sequence[float]) -> np.ndarray:
+        """Normalize a color sequence to RGBA float32."""
+        if len(color) == 3:
+            rgba = [color[0], color[1], color[2], self.alpha]
+        elif len(color) == 4:
+            rgba = list(color)
+        else:
+            raise ValueError("Colors must be RGB or RGBA sequences.")
+        return np.array(rgba, dtype=np.float32)
+
+    def _build_orbital_colors(
+        self,
+        occupied_colors: Optional[Sequence[Sequence[float]]],
+        unoccupied_colors: Optional[Sequence[Sequence[float]]],
+        default_colors: Sequence[np.ndarray],
+    ) -> list[np.ndarray]:
+        """Return the orbital colors list in occupied/unoccupied order."""
+        if occupied_colors is None and unoccupied_colors is None:
+            return list(default_colors)
+
+        if occupied_colors is None or unoccupied_colors is None:
+            raise ValueError("Both occupied_colors and unoccupied_colors must be provided.")
+
+        if len(occupied_colors) != 2 or len(unoccupied_colors) != 2:
+            raise ValueError("Expected two colors for occupied and two for unoccupied orbitals.")
+
+        return [
+            self._normalize_color(occupied_colors[0]),
+            self._normalize_color(occupied_colors[1]),
+            self._normalize_color(unoccupied_colors[0]),
+            self._normalize_color(unoccupied_colors[1]),
+        ]
+
+    def _resolve_occupied_orbitals(
+        self,
+        nocc: Optional[int | str],
+        nuclei: Sequence[NucleusSpec],
+        orbital_count: int,
+    ) -> int:
+        """Determine the number of occupied orbitals."""
+        if nocc is None:
+            nelec = np.sum([atom[1] for atom in nuclei])
+            return int(nelec / 2)
+        if isinstance(nocc, str):
+            if nocc == "all":
+                return orbital_count
+            raise ValueError("nocc must be an integer, None, or 'all'.")
+        if nocc < 0:
+            raise ValueError("nocc must be non-negative.")
+        return int(nocc)
 
     def _write_file_header(self, f: BinaryIO, version: Optional[int] = None, flags: int = 0) -> None:
         """
@@ -139,6 +206,35 @@ class AboBuilder:
             raise ValueError(f"Unsupported normal encoding: {normal_encoding}")
         f.write(int(len(indices) / 3).to_bytes(4, byteorder='little'))
         f.write(indices.tobytes())
+
+    def _load_stl_model(self, stl_file: os.PathLike[str] | str) -> ModelData:
+        """Load an STL file into ABO model data arrays."""
+        stl_data = stl_mesh.Mesh.from_file(str(stl_file))
+        triangles = stl_data.vectors.astype(np.float32)
+        tri_count = triangles.shape[0]
+
+        normals = stl_data.normals.astype(np.float32)
+        if normals.shape[0] != tri_count:
+            normals = np.zeros((tri_count, 3), dtype=np.float32)
+
+        norms = np.linalg.norm(normals, axis=1)
+        if np.any(norms == 0):
+            edge1 = triangles[:, 1] - triangles[:, 0]
+            edge2 = triangles[:, 2] - triangles[:, 0]
+            face_normals = np.cross(edge1, edge2)
+            face_norms = np.linalg.norm(face_normals, axis=1)
+            face_norms = np.where(face_norms == 0, 1.0, face_norms)
+            face_normals = face_normals / face_norms[:, None]
+            normals = face_normals.astype(np.float32)
+
+        vertices = triangles.reshape(-1, 3)
+        normals_per_vertex = np.repeat(normals, 3, axis=0)
+        indices = np.arange(vertices.shape[0], dtype=np.uint32)
+        return {
+            "vertices": vertices,
+            "normals": normals_per_vertex,
+            "indices": indices,
+        }
 
     def build_abo_model(
         self,
@@ -285,6 +381,67 @@ class AboBuilder:
         # report filesize
         print("Creating file: %s" % outfile)
         print("Size: %f MB" % (os.stat(outfile).st_size / (1024*1024)))
+
+    def _normalize_stl_color(self, color: Sequence[float] | str) -> np.ndarray:
+        """Normalize STL model colors to RGBA float32 arrays."""
+        if isinstance(color, str):
+            hexcode = color.strip().lstrip("#")
+            if len(hexcode) not in (6, 8):
+                raise ValueError("Hex colors must be 6 or 8 characters.")
+            r = int(hexcode[0:2], 16)
+            g = int(hexcode[2:4], 16)
+            b = int(hexcode[4:6], 16)
+            if len(hexcode) == 8:
+                a = int(hexcode[6:8], 16)
+                alpha = a / 255.0
+            else:
+                alpha = 1.0
+            return np.array([r / 255.0, g / 255.0, b / 255.0, alpha], dtype=np.float32)
+
+        if len(color) != 4:
+            raise ValueError("STL colors must be 4D RGBA sequences.")
+        return np.array(color, dtype=np.float32)
+
+    def build_abo_models_from_stl_v1(
+        self,
+        outfile: os.PathLike[str] | str,
+        stl_files: Sequence[os.PathLike[str] | str],
+        colors: Sequence[Sequence[float] | str],
+        geometry_descriptor: str = "Geometry",
+        flags: int = 0,
+        compress: bool = False,
+    ) -> None:
+        """
+        Build a version 1 ABOF file from multiple STL files.
+
+        Args:
+            outfile: Destination file path.
+            stl_files: List of STL file paths to combine into a single frame.
+            colors: RGBA color arrays or hex color strings for each STL model.
+            geometry_descriptor: Descriptor text for the initial geometry frame.
+            flags: ABOF header flags.
+            compress: Enable payload compression with Zstandard.
+        """
+        if len(stl_files) != len(colors):
+            raise ValueError("Number of STL files must match number of colors.")
+
+        normalized_colors = [self._normalize_stl_color(color) for color in colors]
+
+        models = [self._load_stl_model(stl_file) for stl_file in stl_files]
+        if models:
+            all_vertices = np.vstack([model["vertices"] for model in models])
+            center = np.mean(all_vertices, axis=0)
+            for model in models:
+                model["vertices"] = model["vertices"] - center
+
+        self.build_abo_model_v1(
+            outfile,
+            models,
+            normalized_colors,
+            geometry_descriptor=geometry_descriptor,
+            flags=flags,
+            compress=compress,
+        )
 
     def build_abo_orbs(
         self,
@@ -579,6 +736,7 @@ class AboBuilder:
         cgfs: Sequence[Any],
         coeff: np.ndarray,
         energies: Sequence[float],
+        nocc: Optional[int | str] = None,
         isovalue: float = 0.03,
         maxmo: int = -1,
         sz: float = 5.0,
@@ -592,6 +750,7 @@ class AboBuilder:
             cgfs,
             coeff,
             energies,
+            nocc=nocc,
             isovalue=isovalue,
             maxmo=maxmo,
             sz=sz,
@@ -606,6 +765,7 @@ class AboBuilder:
         cgfs: Sequence[Any],
         coeff: np.ndarray,
         energies: Sequence[float],
+        nocc: Optional[int | str] = None,
         isovalue: float = 0.03,
         maxmo: int = -1,
         sz: float = 5.0,
@@ -622,6 +782,8 @@ class AboBuilder:
             cgfs: Contracted Gaussian basis functions.
             coeff: Molecular orbital coefficient matrix.
             energies: Orbital energies (eV).
+            nocc: Number of occupied orbitals. Use None to infer from electron count,
+                or "all" to mark all orbitals as occupied.
             isovalue: Isosurface value for marching cubes.
             maxmo: Limit number of molecular orbitals (-1 for all).
             sz: Half-length of the sampling cube in Bohr.
@@ -657,8 +819,15 @@ class AboBuilder:
         f.write(int(0).to_bytes(1, byteorder='little'))
         f.write(int(0).to_bytes(1, byteorder='little'))
 
-        # Total electron count for occupancy determination.
-        nelec = np.sum([atom[1] for atom in nuclei])
+        orbital_count = nr_frames - 1
+        occupied_orbitals = self._resolve_occupied_orbitals(nocc, nuclei, orbital_count)
+
+        # Precompute basis function scalar fields for efficient MO evaluation.
+        grid = integrator.build_rectgrid3d(-sz, sz, nsamples)
+        basis_fields = np.array(
+            [integrator.plot_basis_function(grid, cgf) for cgf in cgfs],
+            dtype=np.float64,
+        ).reshape(len(cgfs), nsamples, nsamples, nsamples)
 
         #
         # Write the geometry including the orbitals
@@ -680,17 +849,20 @@ class AboBuilder:
             f.write(int(2).to_bytes(2, byteorder='little'))
             for j in range(0, 2):
                 # build the pos and negative isosurfaces from the cubefiles
-                # 3D grid of sampling points for the wavefunction.
-                grid = integrator.build_rectgrid3d(-sz, sz, nsamples)
                 # Scalar field values at each grid point.
-                scalarfield = np.reshape(integrator.plot_wavefunction(grid, coeff[:, i - 1], cgfs), (nsamples, nsamples, nsamples))
+                scalarfield = np.einsum(
+                    "bxyz,b->xyz",
+                    basis_fields,
+                    coeff[:, i - 1],
+                    optimize=True,
+                )
                 # Unit cell matrix used by marching cubes.
                 unitcell = np.diag(np.ones(3) * (sz * 2.0))
                 vertices, normals, indices = pytessel.marching_cubes(scalarfield.flatten(), scalarfield.shape, unitcell.flatten(), isovalue if j == 1 else -isovalue)
                 # Convert vertices from Bohr to Angstrom.
                 vertices_scaled = vertices * 0.529177
 
-                if i <= nelec / 2:
+                if i <= occupied_orbitals:
                     color = np.array(self.colors[j])
                 else:
                     color = np.array(self.colors[j+2])
@@ -723,6 +895,7 @@ class AboBuilder:
         cgfs: Sequence[Any],
         coeff: np.ndarray,
         energies: Sequence[float],
+        nocc: Optional[int | str] = None,
         isovalue: float = 0.03,
         maxmo: int = -1,
         sz: float = 5.0,
@@ -740,6 +913,8 @@ class AboBuilder:
             cgfs: Contracted Gaussian basis functions.
             coeff: Molecular orbital coefficient matrix.
             energies: Orbital energies (eV).
+            nocc: Number of occupied orbitals. Use None to infer from electron count,
+                or "all" to mark all orbitals as occupied.
             isovalue: Isosurface value for marching cubes.
             maxmo: Limit number of molecular orbitals (-1 for all).
             sz: Half-length of the sampling cube in Bohr.
@@ -784,8 +959,15 @@ class AboBuilder:
         payload_stream.write(int(0).to_bytes(1, byteorder='little'))
         payload_stream.write(int(0).to_bytes(1, byteorder='little'))
 
-        # Total electron count for occupancy determination.
-        nelec = np.sum([atom[1] for atom in nuclei])
+        orbital_count = nr_frames - 1
+        occupied_orbitals = self._resolve_occupied_orbitals(nocc, nuclei, orbital_count)
+
+        # Precompute basis function scalar fields for efficient MO evaluation.
+        grid = integrator.build_rectgrid3d(-sz, sz, nsamples)
+        basis_fields = np.array(
+            [integrator.plot_basis_function(grid, cgf) for cgf in cgfs],
+            dtype=np.float64,
+        ).reshape(len(cgfs), nsamples, nsamples, nsamples)
 
         #
         # Write the geometry including the orbitals
@@ -807,17 +989,20 @@ class AboBuilder:
             payload_stream.write(int(2).to_bytes(2, byteorder='little'))
             for j in range(0, 2):
                 # build the pos and negative isosurfaces from the cubefiles
-                # 3D grid of sampling points for the wavefunction.
-                grid = integrator.build_rectgrid3d(-sz, sz, nsamples)
                 # Scalar field values at each grid point.
-                scalarfield = np.reshape(integrator.plot_wavefunction(grid, coeff[:, i - 1], cgfs), (nsamples, nsamples, nsamples))
+                scalarfield = np.einsum(
+                    "bxyz,b->xyz",
+                    basis_fields,
+                    coeff[:, i - 1],
+                    optimize=True,
+                )
                 # Unit cell matrix used by marching cubes.
                 unitcell = np.diag(np.ones(3) * (sz * 2.0))
                 vertices, normals, indices = pytessel.marching_cubes(scalarfield.flatten(), scalarfield.shape, unitcell.flatten(), isovalue if j == 1 else -isovalue)
                 # Convert vertices from Bohr to Angstrom.
                 vertices_scaled = vertices * 0.529177
 
-                if i <= nelec / 2:
+                if i <= occupied_orbitals:
                     color = np.array(self.colors[j])
                 else:
                     color = np.array(self.colors[j+2])

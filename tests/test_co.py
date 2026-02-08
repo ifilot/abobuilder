@@ -20,7 +20,8 @@ class TestAboOrbitals(unittest.TestCase):
                                     res['nuclei'], 
                                     res['cgfs'], 
                                     res['orbc'], 
-                                    res['orbe'])
+                                    res['orbe'],
+                                    nsamples=51)
 
         self.assertTrue(os.path.exists('co.abo'))
 
@@ -33,7 +34,8 @@ class TestAboOrbitals(unittest.TestCase):
                                     res['nuclei'], 
                                     res_fb['cgfs'], 
                                     res_fb['orbc'], 
-                                    res_fb['orbe'])
+                                    res_fb['orbe'],
+                                    nsamples=51)
         
         self.assertTrue(os.path.exists('co_fb.abo'))
 
