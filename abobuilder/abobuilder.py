@@ -7,6 +7,7 @@ from typing import Any, BinaryIO, Mapping, Optional, Sequence
 import io
 import numpy as np
 import os
+from stl import mesh as stl_mesh
 import zstandard as zstd
 
 Vector3 = Sequence[float]
@@ -206,6 +207,35 @@ class AboBuilder:
         f.write(int(len(indices) / 3).to_bytes(4, byteorder='little'))
         f.write(indices.tobytes())
 
+    def _load_stl_model(self, stl_file: os.PathLike[str] | str) -> ModelData:
+        """Load an STL file into ABO model data arrays."""
+        stl_data = stl_mesh.Mesh.from_file(str(stl_file))
+        triangles = stl_data.vectors.astype(np.float32)
+        tri_count = triangles.shape[0]
+
+        normals = stl_data.normals.astype(np.float32)
+        if normals.shape[0] != tri_count:
+            normals = np.zeros((tri_count, 3), dtype=np.float32)
+
+        norms = np.linalg.norm(normals, axis=1)
+        if np.any(norms == 0):
+            edge1 = triangles[:, 1] - triangles[:, 0]
+            edge2 = triangles[:, 2] - triangles[:, 0]
+            face_normals = np.cross(edge1, edge2)
+            face_norms = np.linalg.norm(face_normals, axis=1)
+            face_norms = np.where(face_norms == 0, 1.0, face_norms)
+            face_normals = face_normals / face_norms[:, None]
+            normals = face_normals.astype(np.float32)
+
+        vertices = triangles.reshape(-1, 3)
+        normals_per_vertex = np.repeat(normals, 3, axis=0)
+        indices = np.arange(vertices.shape[0], dtype=np.uint32)
+        return {
+            "vertices": vertices,
+            "normals": normals_per_vertex,
+            "indices": indices,
+        }
+
     def build_abo_model(
         self,
         outfile: os.PathLike[str] | str,
@@ -351,6 +381,67 @@ class AboBuilder:
         # report filesize
         print("Creating file: %s" % outfile)
         print("Size: %f MB" % (os.stat(outfile).st_size / (1024*1024)))
+
+    def _normalize_stl_color(self, color: Sequence[float] | str) -> np.ndarray:
+        """Normalize STL model colors to RGBA float32 arrays."""
+        if isinstance(color, str):
+            hexcode = color.strip().lstrip("#")
+            if len(hexcode) not in (6, 8):
+                raise ValueError("Hex colors must be 6 or 8 characters.")
+            r = int(hexcode[0:2], 16)
+            g = int(hexcode[2:4], 16)
+            b = int(hexcode[4:6], 16)
+            if len(hexcode) == 8:
+                a = int(hexcode[6:8], 16)
+                alpha = a / 255.0
+            else:
+                alpha = 1.0
+            return np.array([r / 255.0, g / 255.0, b / 255.0, alpha], dtype=np.float32)
+
+        if len(color) != 4:
+            raise ValueError("STL colors must be 4D RGBA sequences.")
+        return np.array(color, dtype=np.float32)
+
+    def build_abo_models_from_stl_v1(
+        self,
+        outfile: os.PathLike[str] | str,
+        stl_files: Sequence[os.PathLike[str] | str],
+        colors: Sequence[Sequence[float] | str],
+        geometry_descriptor: str = "Geometry",
+        flags: int = 0,
+        compress: bool = False,
+    ) -> None:
+        """
+        Build a version 1 ABOF file from multiple STL files.
+
+        Args:
+            outfile: Destination file path.
+            stl_files: List of STL file paths to combine into a single frame.
+            colors: RGBA color arrays or hex color strings for each STL model.
+            geometry_descriptor: Descriptor text for the initial geometry frame.
+            flags: ABOF header flags.
+            compress: Enable payload compression with Zstandard.
+        """
+        if len(stl_files) != len(colors):
+            raise ValueError("Number of STL files must match number of colors.")
+
+        normalized_colors = [self._normalize_stl_color(color) for color in colors]
+
+        models = [self._load_stl_model(stl_file) for stl_file in stl_files]
+        if models:
+            all_vertices = np.vstack([model["vertices"] for model in models])
+            center = np.mean(all_vertices, axis=0)
+            for model in models:
+                model["vertices"] = model["vertices"] - center
+
+        self.build_abo_model_v1(
+            outfile,
+            models,
+            normalized_colors,
+            geometry_descriptor=geometry_descriptor,
+            flags=flags,
+            compress=compress,
+        )
 
     def build_abo_orbs(
         self,

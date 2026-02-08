@@ -22,6 +22,7 @@ classifiers = [
 dependencies = [
     "scipy",
     "numpy",
+    "numpy-stl",
     "pyqint",
     "pytessel",
     "zstandard",
