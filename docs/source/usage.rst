@@ -149,16 +149,16 @@ last image from each directory, and always reads endpoints from ``POSCAR``.
 
    builder = AboBuilder()
 
-   # Legacy .abo file (atoms only, no mesh objects)
+   # Default behavior: write ABOF v1 trajectory files.
    builder.build_abo_neb_vasp(
-       'neb_path.abo',
+       'neb_path.abof',
        'my_neb_run',
        lattice_atom_count=24,  # use -N to expand all except the last N atoms
        expand_xy=(3, 3),
    )
 
-   # ABOF v1 variant with the reaction-event header bit enabled.
-   builder.build_abof_neb_vasp_v1('neb_path.abof', 'my_neb_run')
+   # Fallback for legacy consumers that still require v0 .abo output.
+   builder.build_abo_neb_vasp('neb_path.abo', 'my_neb_run', legacy_mode=True)
 
 All NEB frames are centered around the unit-cell midpoint ``(0.5, 0.5, 0.5)``
 in direct coordinates before optional lattice expansion.
