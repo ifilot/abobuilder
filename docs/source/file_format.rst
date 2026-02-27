@@ -23,8 +23,11 @@ Version 1 files begin with a fixed 8-byte header before the payload:
 #. ``uint8`` version number (currently ``1``)
 #. ``uint8`` flags bitfield
 
-The only flag currently used by the writer is bit ``0x01`` to indicate
-compression.
+The writer currently uses two bits:
+
+* ``0x01`` indicates payload compression.
+* ``0x02`` marks trajectory files that contain a reaction event
+  (for example NEB pathways).
 
 Compression
 -----------
