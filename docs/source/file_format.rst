@@ -2,7 +2,7 @@ ABO file format
 ===============
 
 ABO Builder writes binary ``.abo`` files for Managlyph. The package supports
-legacy v0 files and the newer v1 ``ABOF`` container format.
+legacy v0 files and the newer ``ABOF`` container formats (v1 and v2).
 
 Overview
 --------
@@ -12,15 +12,17 @@ Overview
 * **v1**: an ``ABOF`` container with a fixed header, optional Zstandard
   compression, and octahedral-encoded normal vectors for more compact mesh
   storage.
+* **v2**: extends the payload frame layout with optional per-frame metadata
+  sections (currently a unit-cell matrix).
 
-ABOF v1 header
+ABOF header (v1 and v2)
 --------------
 
-Version 1 files begin with a fixed 8-byte header before the payload:
+ABOF v1/v2 files begin with a fixed 8-byte header before the payload:
 
 #. ``uint16`` zero padding (reserved, currently ``0``)
 #. ASCII ``"ABOF"`` marker
-#. ``uint8`` version number (currently ``1``)
+#. ``uint8`` version number (currently ``1`` or ``2``)
 #. ``uint8`` flags bitfield
 
 The writer currently uses two bits:
@@ -38,11 +40,11 @@ disk. When the flag is not set, payload bytes are written directly to the file
 stream. The compressed payload stores the exact same data order as the
 uncompressed payload; only the container differs.
 
-Payload structure (v0 and v1)
+Payload structure
 -----------------------------
 
-The binary payload for v0 and v1 is identical. The only differences are the
-presence of the v1 header and the normal encoding used inside mesh blocks.
+The v0 and v1 payload layout is identical. v2 adds an optional frame metadata
+byte (and optional metadata payloads) immediately after each frame descriptor.
 
 Frame table
 ~~~~~~~~~~~
@@ -56,10 +58,24 @@ Each frame is written sequentially as:
 * ``uint16`` frame index (1-based)
 * ``uint16`` descriptor length (bytes)
 * UTF-8 descriptor text
+* ``uint8`` frame metadata flags (**v2 only**)
+* Optional metadata payloads (**v2 only**, see below)
 * ``uint16`` number of atoms
 * Atom blocks (see below)
 * ``uint16`` number of models (meshes)
 * Model blocks (see below)
+
+
+Frame metadata flags (v2)
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+For ABOF v2 payloads, each frame includes a one-byte metadata flag field after
+the descriptor text.
+
+* Bit ``0x01``: unit-cell matrix is present and encoded as ``float32[9]``
+  (row-major 3x3 matrix).
+
+If no metadata bits are set, the byte is still present and set to ``0``.
 
 Atom blocks
 ~~~~~~~~~~~

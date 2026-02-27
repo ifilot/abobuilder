@@ -24,6 +24,8 @@ class AboBuilder:
     _COMPRESSION_FLAG_BIT = 0x01
     # Bit flag to mark files that contain reaction-event trajectories.
     _REACTION_EVENT_FLAG_BIT = 0x02
+    # Bit flag to mark frames that include unit-cell data in ABOF v2 payloads.
+    _FRAME_UNIT_CELL_FLAG_BIT = 0x01
     # Zstandard compression level used for ABOF payloads.
     _ZSTD_COMPRESSION_LEVEL = 22
 
@@ -125,12 +127,33 @@ class AboBuilder:
         """
         if version is None or version == 0:
             return
-        if version != 1:
+        if version not in (1, 2):
             raise ValueError(f"Unsupported ABO format version: {version}")
         f.write(int(0).to_bytes(2, byteorder='little'))
         f.write(bytearray('ABOF', encoding='ascii'))
         f.write(int(version).to_bytes(1, byteorder='little'))
         f.write(int(flags).to_bytes(1, byteorder='little'))
+
+    def _write_optional_frame_unit_cell(self, f: BinaryIO, version: Optional[int], unit_cell: Optional[np.ndarray]) -> None:
+        """
+        Write optional frame metadata for ABOF v2 payloads.
+
+        In v2 payloads, a one-byte frame bitfield precedes frame body content.
+        If the unit-cell bit is set, a float32[9] row-major cell matrix follows.
+        """
+        if version != 2:
+            return
+
+        frame_flags = 0
+        if unit_cell is not None:
+            frame_flags |= self._FRAME_UNIT_CELL_FLAG_BIT
+
+        f.write(int(frame_flags).to_bytes(1, byteorder='little'))
+        if unit_cell is not None:
+            matrix = np.array(unit_cell, dtype=np.float32)
+            if matrix.shape != (3, 3):
+                raise ValueError("unit_cell must be a 3x3 matrix.")
+            f.write(matrix.tobytes())
 
     def _write_frame_header(self, f: BinaryIO, frame_idx: int, descriptor: str) -> None:
         """
@@ -401,11 +424,61 @@ class AboBuilder:
         centered_positions = centered_scaled @ cell
         return centered_positions, cell
 
+    def _unwrap_neb_scaled_positions(
+        self,
+        scaled_positions: np.ndarray,
+        previous_scaled_positions: Optional[np.ndarray],
+    ) -> np.ndarray:
+        """Unwrap scaled positions to maintain frame-to-frame continuity for NEB paths."""
+        if previous_scaled_positions is None:
+            return np.array(scaled_positions, dtype=np.float64)
+
+        if scaled_positions.shape != previous_scaled_positions.shape:
+            raise ValueError("NEB images do not contain a consistent number of atoms.")
+
+        delta = scaled_positions - previous_scaled_positions
+        image_shift = np.round(delta)
+        return scaled_positions - image_shift
+
+    def _principal_cell_offsets_for_unwrapped_neb(self, unwrapped_scaled_series: np.ndarray) -> np.ndarray:
+        """Return per-atom integer shifts that keep trajectories as much as possible in the principal cell."""
+        if unwrapped_scaled_series.ndim != 3:
+            raise ValueError("unwrapped_scaled_series must have shape (nframes, natoms, 3).")
+
+        _, natoms, ndim = unwrapped_scaled_series.shape
+        if ndim != 3:
+            raise ValueError("Scaled position trajectories must be 3D.")
+
+        offsets = np.zeros((natoms, 3), dtype=np.float64)
+        for atom_idx in range(natoms):
+            for axis in range(3):
+                values = unwrapped_scaled_series[:, atom_idx, axis]
+                lo = int(np.floor(np.min(values))) - 1
+                hi = int(np.ceil(np.max(values))) + 1
+
+                best_shift = 0
+                best_in_cell = -1
+                best_center_score = float('inf')
+                for shift in range(lo, hi + 1):
+                    shifted = values - shift
+                    in_cell = int(np.count_nonzero((shifted >= 0.0) & (shifted < 1.0)))
+                    center_score = float(np.mean(np.abs(shifted - 0.5)))
+
+                    if in_cell > best_in_cell or (in_cell == best_in_cell and center_score < best_center_score):
+                        best_shift = shift
+                        best_in_cell = in_cell
+                        best_center_score = center_score
+
+                offsets[atom_idx, axis] = float(best_shift)
+
+        return offsets
+
     def _expand_lattice_atoms(
         self,
         atoms: Any,
         lattice_atom_count: int,
         expand_xy: tuple[int, int],
+        centered_positions: Optional[np.ndarray] = None,
     ) -> list[tuple[np.ndarray, int]]:
         """Expand selected lattice atoms in the XY plane using the cell vectors."""
         nx, ny = expand_xy
@@ -417,7 +490,11 @@ class AboBuilder:
         atom_count = len(atoms)
         lattice_count = self._resolve_lattice_atom_count(atom_count, lattice_atom_count)
 
-        atom_positions, cell = self._center_atoms_in_cell(atoms)
+        cell = atoms.cell.array
+        if centered_positions is None:
+            atom_positions, _ = self._center_atoms_in_cell(atoms)
+        else:
+            atom_positions = np.array(centered_positions, dtype=np.float64)
         atomic_numbers = atoms.get_atomic_numbers()
 
         lattice_positions = atom_positions[:lattice_count]
@@ -462,6 +539,7 @@ class AboBuilder:
         legacy_mode: bool = False,
         flags: int = 0,
         reaction_event: bool = True,
+        include_unit_cell: bool = True,
     ) -> None:
         """
         Build a VASP NEB trajectory.
@@ -469,8 +547,9 @@ class AboBuilder:
         For each numbered image directory, only the final ionic step is written.
         Endpoints are always read from ``POSCAR``.
 
-        By default, this writer emits ABOF v1 trajectories. Set ``legacy_mode``
-        to ``True`` to write legacy v0 ABO files as a fallback.
+        By default, this writer emits ABOF v2 trajectories. Set ``legacy_mode``
+        to ``True`` to write legacy v0 ABO files as a fallback. In v2 payloads,
+        each frame can optionally carry a 3x3 unit-cell matrix.
         """
         if not legacy_mode and reaction_event:
             flags |= self._REACTION_EVENT_FLAG_BIT
@@ -479,15 +558,41 @@ class AboBuilder:
 
         with open(outfile, 'wb') as f:
             if not legacy_mode:
-                self._write_file_header(f, version=1, flags=flags)
+                self._write_file_header(f, version=2, flags=flags)
             f.write(len(image_dirs).to_bytes(2, byteorder='little'))
+
+            atoms_by_frame: list[Any] = []
+            unwrapped_scaled_by_frame: list[np.ndarray] = []
+            previous_scaled_positions: Optional[np.ndarray] = None
 
             for frame_idx, dirname in enumerate(image_dirs, start=1):
                 endpoint = frame_idx == 1 or frame_idx == len(image_dirs)
                 atoms = self._read_vasp_neb_image(os.path.join(neb_directory, dirname), endpoint=endpoint)
-                expanded_atoms = self._expand_lattice_atoms(atoms, lattice_atom_count, expand_xy)
+                scaled_positions = np.array(atoms.get_scaled_positions(wrap=False), dtype=np.float64)
+                unwrapped_scaled = self._unwrap_neb_scaled_positions(scaled_positions, previous_scaled_positions)
+
+                atoms_by_frame.append(atoms)
+                unwrapped_scaled_by_frame.append(unwrapped_scaled)
+                previous_scaled_positions = unwrapped_scaled
+
+            unwrapped_scaled_series = np.stack(unwrapped_scaled_by_frame, axis=0)
+            per_atom_offsets = self._principal_cell_offsets_for_unwrapped_neb(unwrapped_scaled_series)
+
+            for frame_idx, dirname in enumerate(image_dirs, start=1):
+                atoms = atoms_by_frame[frame_idx - 1]
+                adjusted_scaled = unwrapped_scaled_by_frame[frame_idx - 1] - per_atom_offsets
+                centered_positions = (adjusted_scaled - np.array([0.5, 0.5, 0.5], dtype=np.float64)) @ atoms.cell.array
+
+                expanded_atoms = self._expand_lattice_atoms(
+                    atoms,
+                    lattice_atom_count,
+                    expand_xy,
+                    centered_positions=centered_positions,
+                )
 
                 self._write_frame_header(f, frame_idx, f'NEB image {dirname}')
+                unit_cell = np.array(atoms.cell.array, dtype=np.float32) if include_unit_cell and not legacy_mode else None
+                self._write_optional_frame_unit_cell(f, 2 if not legacy_mode else None, unit_cell)
                 f.write(len(expanded_atoms).to_bytes(2, byteorder='little'))
                 for position, atomic_number in expanded_atoms:
                     f.write(int(atomic_number).to_bytes(1, byteorder='little'))
@@ -507,7 +612,7 @@ class AboBuilder:
         flags: int = 0,
         reaction_event: bool = True,
     ) -> None:
-        """Build an ABOF v1 trajectory from VASP NEB images."""
+        """Backward-compatible alias that now emits an ABOF v2 trajectory."""
         self.build_abo_neb_vasp(
             outfile,
             neb_directory,
