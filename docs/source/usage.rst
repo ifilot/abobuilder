@@ -149,7 +149,7 @@ last image from each directory, and always reads endpoints from ``POSCAR``.
 
    builder = AboBuilder()
 
-   # Default behavior: write ABOF v1 trajectory files.
+   # Default behavior: write ABOF v2 trajectory files with per-frame unit cells.
    builder.build_abo_neb_vasp(
        'neb_path.abof',
        'my_neb_run',
@@ -157,11 +157,17 @@ last image from each directory, and always reads endpoints from ``POSCAR``.
        expand_xy=(3, 3),
    )
 
+   # Optional: emit v2 without unit-cell metadata blocks.
+   builder.build_abo_neb_vasp('neb_path_no_cell.abof', 'my_neb_run', include_unit_cell=False)
+
    # Fallback for legacy consumers that still require v0 .abo output.
    builder.build_abo_neb_vasp('neb_path.abo', 'my_neb_run', legacy_mode=True)
 
 All NEB frames are centered around the unit-cell midpoint ``(0.5, 0.5, 0.5)``
-in direct coordinates before optional lattice expansion.
+in direct coordinates before optional lattice expansion. Frame-to-frame atom
+positions are unwrapped across periodic boundaries to keep NEB motion
+continuous when atoms cross cell edges, then shifted per atom to keep
+trajectories as much as possible in the principal unit cell.
 
 ``expand_xy`` values must be positive odd integers so the expansion can be
 centered around zero (for example ``(3, 3)`` yields offsets ``-1, 0, 1`` in
