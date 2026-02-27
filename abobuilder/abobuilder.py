@@ -459,16 +459,27 @@ class AboBuilder:
         neb_directory: os.PathLike[str] | str,
         lattice_atom_count: int = 0,
         expand_xy: tuple[int, int] = (1, 1),
+        legacy_mode: bool = False,
+        flags: int = 0,
+        reaction_event: bool = True,
     ) -> None:
         """
-        Build a legacy ABO trajectory from a VASP NEB calculation.
+        Build a VASP NEB trajectory.
 
         For each numbered image directory, only the final ionic step is written.
         Endpoints are always read from ``POSCAR``.
+
+        By default, this writer emits ABOF v1 trajectories. Set ``legacy_mode``
+        to ``True`` to write legacy v0 ABO files as a fallback.
         """
+        if not legacy_mode and reaction_event:
+            flags |= self._REACTION_EVENT_FLAG_BIT
+
         image_dirs = self._collect_neb_directories(neb_directory)
 
         with open(outfile, 'wb') as f:
+            if not legacy_mode:
+                self._write_file_header(f, version=1, flags=flags)
             f.write(len(image_dirs).to_bytes(2, byteorder='little'))
 
             for frame_idx, dirname in enumerate(image_dirs, start=1):
@@ -497,29 +508,15 @@ class AboBuilder:
         reaction_event: bool = True,
     ) -> None:
         """Build an ABOF v1 trajectory from VASP NEB images."""
-        if reaction_event:
-            flags |= self._REACTION_EVENT_FLAG_BIT
-
-        image_dirs = self._collect_neb_directories(neb_directory)
-        with open(outfile, 'wb') as f:
-            self._write_file_header(f, version=1, flags=flags)
-            f.write(len(image_dirs).to_bytes(2, byteorder='little'))
-
-            for frame_idx, dirname in enumerate(image_dirs, start=1):
-                endpoint = frame_idx == 1 or frame_idx == len(image_dirs)
-                atoms = self._read_vasp_neb_image(os.path.join(neb_directory, dirname), endpoint=endpoint)
-                expanded_atoms = self._expand_lattice_atoms(atoms, lattice_atom_count, expand_xy)
-
-                self._write_frame_header(f, frame_idx, f'NEB image {dirname}')
-                f.write(len(expanded_atoms).to_bytes(2, byteorder='little'))
-                for position, atomic_number in expanded_atoms:
-                    f.write(int(atomic_number).to_bytes(1, byteorder='little'))
-                    f.write(np.array(position, dtype=np.float32).tobytes())
-
-                f.write(int(0).to_bytes(2, byteorder='little'))
-
-        print("Creating file: %s" % outfile)
-        print("Size: %f MB" % (os.stat(outfile).st_size / (1024*1024)))
+        self.build_abo_neb_vasp(
+            outfile,
+            neb_directory,
+            lattice_atom_count=lattice_atom_count,
+            expand_xy=expand_xy,
+            legacy_mode=False,
+            flags=flags,
+            reaction_event=reaction_event,
+        )
 
     def build_abo_model(
         self,

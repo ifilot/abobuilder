@@ -71,7 +71,7 @@ class TestNebBuilder(unittest.TestCase):
             self._write_neb_image(tmpdir, '09', end)
 
             outfile = os.path.join(tmpdir, 'neb.abo')
-            builder.build_abo_neb_vasp(outfile, tmpdir)
+            builder.build_abo_neb_vasp(outfile, tmpdir, legacy_mode=True)
             frames = self._read_v0_frames(outfile)
 
             self.assertEqual(len(frames), 3)
@@ -88,7 +88,13 @@ class TestNebBuilder(unittest.TestCase):
             self._write_neb_image(tmpdir, '09', image)
 
             outfile = os.path.join(tmpdir, 'neb_expand.abo')
-            builder.build_abo_neb_vasp(outfile, tmpdir, lattice_atom_count=1, expand_xy=(3, 3))
+            builder.build_abo_neb_vasp(
+                outfile,
+                tmpdir,
+                lattice_atom_count=1,
+                expand_xy=(3, 3),
+                legacy_mode=True,
+            )
             frames = self._read_v0_frames(outfile)
 
             self.assertEqual(len(frames[0]), 10)
@@ -102,7 +108,13 @@ class TestNebBuilder(unittest.TestCase):
             self._write_neb_image(tmpdir, '09', image)
 
             outfile = os.path.join(tmpdir, 'neb_negative_expand.abo')
-            builder.build_abo_neb_vasp(outfile, tmpdir, lattice_atom_count=-1, expand_xy=(3, 1))
+            builder.build_abo_neb_vasp(
+                outfile,
+                tmpdir,
+                lattice_atom_count=-1,
+                expand_xy=(3, 1),
+                legacy_mode=True,
+            )
             frames = self._read_v0_frames(outfile)
 
             # Expand all except the last atom: 2 expanded across 3x1 + 1 unchanged.
@@ -118,9 +130,21 @@ class TestNebBuilder(unittest.TestCase):
 
             outfile = os.path.join(tmpdir, 'neb_invalid_expand.abo')
             with self.assertRaises(ValueError):
-                builder.build_abo_neb_vasp(outfile, tmpdir, lattice_atom_count=1, expand_xy=(2, 3))
+                builder.build_abo_neb_vasp(
+                    outfile,
+                    tmpdir,
+                    lattice_atom_count=1,
+                    expand_xy=(2, 3),
+                    legacy_mode=True,
+                )
             with self.assertRaises(ValueError):
-                builder.build_abo_neb_vasp(outfile, tmpdir, lattice_atom_count=1, expand_xy=(-3, 3))
+                builder.build_abo_neb_vasp(
+                    outfile,
+                    tmpdir,
+                    lattice_atom_count=1,
+                    expand_xy=(-3, 3),
+                    legacy_mode=True,
+                )
 
     def test_build_abo_neb_vasp_centers_positions_to_cell_midpoint(self):
         builder = AboBuilder()
@@ -131,7 +155,7 @@ class TestNebBuilder(unittest.TestCase):
             self._write_neb_image(tmpdir, '09', image)
 
             outfile = os.path.join(tmpdir, 'neb_centered.abo')
-            builder.build_abo_neb_vasp(outfile, tmpdir, lattice_atom_count=0)
+            builder.build_abo_neb_vasp(outfile, tmpdir, lattice_atom_count=0, legacy_mode=True)
             frames = self._read_v0_frames(outfile)
 
             np.testing.assert_allclose(frames[0][0][1], [-2.0, -2.0, -2.0], atol=1e-6)
@@ -164,12 +188,29 @@ class TestNebBuilder(unittest.TestCase):
                 handle.write(' TITEL  = PAW_PBE O 08Apr2002\n')
 
             outfile = os.path.join(tmpdir, 'neb_vasp4.abo')
-            builder.build_abo_neb_vasp(outfile, tmpdir)
+            builder.build_abo_neb_vasp(outfile, tmpdir, legacy_mode=True)
             frames = self._read_v0_frames(outfile)
 
             self.assertEqual(len(frames), 3)
             self.assertEqual(frames[0][0][0], 1)
             self.assertEqual(frames[0][1][0], 8)
+
+    def test_build_abo_neb_vasp_defaults_to_abof_v1(self):
+        builder = AboBuilder()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cell = np.diag([4.0, 4.0, 4.0])
+            image = self.Atoms('H', positions=[[0, 0, 0]], cell=cell, pbc=True)
+            self._write_neb_image(tmpdir, '00', image)
+            self._write_neb_image(tmpdir, '09', image)
+
+            outfile = os.path.join(tmpdir, 'neb_default.abof')
+            builder.build_abo_neb_vasp(outfile, tmpdir)
+
+            with open(outfile, 'rb') as handle:
+                header = handle.read(8)
+
+            self.assertEqual(header[2:6], b'ABOF')
+            self.assertEqual(header[6], 1)
 
     def test_build_abof_neb_vasp_sets_reaction_flag(self):
         builder = AboBuilder()
