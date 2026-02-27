@@ -16,7 +16,7 @@ class TestNebBuilder(unittest.TestCase):
         except ModuleNotFoundError as exc:
             raise unittest.SkipTest(f"ASE is required for NEB tests: {exc}")
         cls.Atoms = Atoms
-        cls.write = write
+        cls.write = staticmethod(write)
 
     def _write_neb_image(self, root, name, poscar_atoms, contcar_atoms=None):
         folder = os.path.join(root, name)
@@ -75,9 +75,9 @@ class TestNebBuilder(unittest.TestCase):
             frames = self._read_v0_frames(outfile)
 
             self.assertEqual(len(frames), 3)
-            np.testing.assert_allclose(frames[0][0][1], [0.0, 0.0, 0.0], atol=1e-6)
-            np.testing.assert_allclose(frames[1][0][1], [2.0, 0.0, 0.0], atol=1e-6)
-            np.testing.assert_allclose(frames[2][0][1], [3.0, 0.0, 0.0], atol=1e-6)
+            np.testing.assert_allclose(frames[0][0][1], [-2.5, -2.5, -2.5], atol=1e-6)
+            np.testing.assert_allclose(frames[1][0][1], [-0.5, -2.5, -2.5], atol=1e-6)
+            np.testing.assert_allclose(frames[2][0][1], [0.5, -2.5, -2.5], atol=1e-6)
 
     def test_build_abo_neb_vasp_lattice_expansion(self):
         builder = AboBuilder()
@@ -157,6 +157,8 @@ class TestNebBuilder(unittest.TestCase):
             )
 
             os.makedirs(os.path.join(tmpdir, '01'))
+            middle = self.Atoms('HO', positions=[[0.15, 0.0, 0.0], [0.25, 0.0, 0.0]], cell=cell, pbc=True)
+            self.write(os.path.join(tmpdir, '01', 'CONTCAR'), middle, format='vasp')
             with open(os.path.join(tmpdir, '01', 'OUTCAR'), 'w', encoding='utf8') as handle:
                 handle.write(' TITEL  = PAW_PBE H 08Apr2002\n')
                 handle.write(' TITEL  = PAW_PBE O 08Apr2002\n')
@@ -165,7 +167,7 @@ class TestNebBuilder(unittest.TestCase):
             builder.build_abo_neb_vasp(outfile, tmpdir)
             frames = self._read_v0_frames(outfile)
 
-            self.assertEqual(len(frames), 2)
+            self.assertEqual(len(frames), 3)
             self.assertEqual(frames[0][0][0], 1)
             self.assertEqual(frames[0][1][0], 8)
 

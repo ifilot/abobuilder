@@ -371,7 +371,7 @@ class AboBuilder:
         if endpoint:
             return self._read_vasp_poscar(image_path)
 
-        for filename in ["vasprun.xml", "OUTCAR", "XDATCAR", "CONTCAR", "POSCAR"]:
+        for filename in ["vasprun.xml", "CONTCAR", "XDATCAR", "OUTCAR", "POSCAR"]:
             candidate = os.path.join(image_path, filename)
             if os.path.exists(candidate):
                 from ase.io import read as ase_read
