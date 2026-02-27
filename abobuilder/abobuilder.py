@@ -7,6 +7,7 @@ from typing import Any, BinaryIO, Mapping, Optional, Sequence
 import io
 import numpy as np
 import os
+import re
 from stl import mesh as stl_mesh
 import zstandard as zstd
 
@@ -21,6 +22,8 @@ class AboBuilder:
     """
     # Bit flag to mark compressed payloads in ABOF v1 headers.
     _COMPRESSION_FLAG_BIT = 0x01
+    # Bit flag to mark files that contain reaction-event trajectories.
+    _REACTION_EVENT_FLAG_BIT = 0x02
     # Zstandard compression level used for ABOF payloads.
     _ZSTD_COMPRESSION_LEVEL = 22
 
@@ -235,6 +238,288 @@ class AboBuilder:
             "normals": normals_per_vertex,
             "indices": indices,
         }
+
+    def _extract_vasp_symbols_from_outcar(self, image_dir: os.PathLike[str] | str) -> Optional[list[str]]:
+        """Extract element symbols from OUTCAR files for VASP4 POSCAR fallback."""
+        image_path = os.fspath(image_dir)
+        neb_root = os.path.dirname(image_path)
+        search_paths = [
+            os.path.join(image_path, "OUTCAR"),
+            os.path.join(neb_root, "OUTCAR"),
+        ]
+
+        # Also search sibling NEB image directories because endpoint folders
+        # (00/09) may only contain POSCAR in VASP4 workflows.
+        if os.path.isdir(neb_root):
+            sibling_dirs = [name for name in os.listdir(neb_root) if name.isdigit()]
+            for dirname in sorted(sibling_dirs, key=int):
+                search_paths.append(os.path.join(neb_root, dirname, "OUTCAR"))
+
+        token_pattern = re.compile(r"^[A-Z][a-z]?$")
+        for outcar_path in search_paths:
+            if not os.path.exists(outcar_path):
+                continue
+
+            symbols: list[str] = []
+            with open(outcar_path, 'r', encoding='utf8', errors='ignore') as handle:
+                for line in handle:
+                    if "TITEL" not in line and "POTCAR:" not in line:
+                        continue
+                    for token in line.replace('=', ' ').replace(':', ' ').split():
+                        if token_pattern.match(token):
+                            symbols.append(token)
+                            break
+
+            unique_symbols: list[str] = []
+            for symbol in symbols:
+                if symbol not in unique_symbols:
+                    unique_symbols.append(symbol)
+
+            if unique_symbols:
+                return unique_symbols
+
+        return None
+
+    def _read_vasp4_poscar_with_symbols(
+        self,
+        poscar_file: os.PathLike[str] | str,
+        symbols: Sequence[str],
+    ) -> Any:
+        """Read a VASP4 POSCAR file using symbols obtained from OUTCAR."""
+        from ase import Atoms
+
+        with open(poscar_file, 'r', encoding='utf8', errors='ignore') as handle:
+            lines = [line.strip() for line in handle if line.strip()]
+
+        if len(lines) < 8:
+            raise ValueError(f"POSCAR appears incomplete: {poscar_file}")
+
+        scale = float(lines[1].split()[0])
+        cell = np.array([[float(x) for x in lines[i].split()[:3]] for i in range(2, 5)], dtype=np.float64)
+        cell *= scale
+
+        def _is_integer_line(value: str) -> bool:
+            return all(part.lstrip("+-").isdigit() for part in value.split())
+
+        line6 = lines[5]
+        if _is_integer_line(line6):
+            counts = [int(x) for x in line6.split()]
+            atom_symbols = list(symbols[:len(counts)])
+            cursor = 6
+        else:
+            atom_symbols = line6.split()
+            counts = [int(x) for x in lines[6].split()]
+            cursor = 7
+
+        if len(atom_symbols) < len(counts):
+            raise ValueError(
+                f"Insufficient element symbols for POSCAR {poscar_file}; got {len(atom_symbols)}, need {len(counts)}"
+            )
+
+        coord_mode = lines[cursor].lower()
+        if coord_mode.startswith('s'):
+            cursor += 1
+            coord_mode = lines[cursor].lower()
+        cursor += 1
+
+        natoms = int(sum(counts))
+        raw_positions = np.array(
+            [[float(x) for x in lines[cursor + i].split()[:3]] for i in range(natoms)],
+            dtype=np.float64,
+        )
+
+        if coord_mode.startswith('d'):
+            positions = raw_positions @ cell
+        else:
+            positions = raw_positions * scale
+
+        expanded_symbols: list[str] = []
+        for symbol, count in zip(atom_symbols, counts):
+            expanded_symbols.extend([symbol] * count)
+
+        return Atoms(symbols=expanded_symbols, positions=positions, cell=cell, pbc=True)
+
+    def _read_vasp_poscar(self, image_dir: os.PathLike[str] | str) -> Any:
+        """Read POSCAR, including VASP4 files that lack symbol rows."""
+        image_path = os.fspath(image_dir)
+        poscar_file = os.path.join(image_path, "POSCAR")
+        if not os.path.exists(poscar_file):
+            raise FileNotFoundError(f"Missing POSCAR in endpoint image directory: {image_path}")
+
+        from ase.io import read as ase_read
+        try:
+            from ase.io import ParseError as AseIoParseError
+        except ImportError:
+            AseIoParseError = Exception
+        try:
+            from ase.io.formats import ParseError as AseFormatsParseError
+        except ImportError:
+            AseFormatsParseError = Exception
+
+        try:
+            return ase_read(poscar_file)
+        except (AseIoParseError, AseFormatsParseError):
+            symbols = self._extract_vasp_symbols_from_outcar(image_path)
+            if not symbols:
+                raise
+            return self._read_vasp4_poscar_with_symbols(poscar_file, symbols)
+
+    def _read_vasp_neb_image(self, image_dir: os.PathLike[str] | str, endpoint: bool = False) -> Any:
+        """Read a VASP NEB image directory and return the last available structure."""
+        image_path = os.fspath(image_dir)
+
+        if endpoint:
+            return self._read_vasp_poscar(image_path)
+
+        for filename in ["vasprun.xml", "CONTCAR", "XDATCAR", "OUTCAR", "POSCAR"]:
+            candidate = os.path.join(image_path, filename)
+            if os.path.exists(candidate):
+                from ase.io import read as ase_read
+                if filename == "POSCAR":
+                    return self._read_vasp_poscar(image_path)
+                return ase_read(candidate, index=-1)
+
+        raise FileNotFoundError(f"No readable VASP structure file found in: {image_path}")
+
+    def _resolve_lattice_atom_count(self, atom_count: int, lattice_atom_count: int) -> int:
+        """Resolve lattice atom selection, including negative shorthand values."""
+        if lattice_atom_count >= 0:
+            if lattice_atom_count > atom_count:
+                raise ValueError("lattice_atom_count cannot exceed the number of atoms.")
+            return lattice_atom_count
+
+        keep_unexpanded = -lattice_atom_count
+        if keep_unexpanded > atom_count:
+            raise ValueError("Negative lattice_atom_count excludes more atoms than available.")
+        return atom_count - keep_unexpanded
+
+    def _center_atoms_in_cell(self, atoms: Any) -> tuple[np.ndarray, np.ndarray]:
+        """Return atom positions centered at fractional coordinate (0.5, 0.5, 0.5)."""
+        cell = atoms.cell.array
+        scaled_positions = atoms.get_scaled_positions(wrap=False)
+        centered_scaled = scaled_positions - np.array([0.5, 0.5, 0.5], dtype=np.float64)
+        centered_positions = centered_scaled @ cell
+        return centered_positions, cell
+
+    def _expand_lattice_atoms(
+        self,
+        atoms: Any,
+        lattice_atom_count: int,
+        expand_xy: tuple[int, int],
+    ) -> list[tuple[np.ndarray, int]]:
+        """Expand selected lattice atoms in the XY plane using the cell vectors."""
+        nx, ny = expand_xy
+        if nx <= 0 or ny <= 0:
+            raise ValueError("expand_xy values must be positive odd integers.")
+        if nx % 2 == 0 or ny % 2 == 0:
+            raise ValueError("expand_xy values must be positive odd integers.")
+
+        atom_count = len(atoms)
+        lattice_count = self._resolve_lattice_atom_count(atom_count, lattice_atom_count)
+
+        atom_positions, cell = self._center_atoms_in_cell(atoms)
+        atomic_numbers = atoms.get_atomic_numbers()
+
+        lattice_positions = atom_positions[:lattice_count]
+        lattice_numbers = atomic_numbers[:lattice_count]
+        mobile_positions = atom_positions[lattice_count:]
+        mobile_numbers = atomic_numbers[lattice_count:]
+
+        expanded_atoms: list[tuple[np.ndarray, int]] = []
+        x_offsets = range(-(nx // 2), nx // 2 + 1)
+        y_offsets = range(-(ny // 2), ny // 2 + 1)
+        for ix in x_offsets:
+            for iy in y_offsets:
+                shift = ix * cell[0] + iy * cell[1]
+                for pos, number in zip(lattice_positions, lattice_numbers):
+                    expanded_atoms.append((np.array(pos + shift, dtype=np.float32), int(number)))
+
+        for pos, number in zip(mobile_positions, mobile_numbers):
+            expanded_atoms.append((np.array(pos, dtype=np.float32), int(number)))
+
+        return expanded_atoms
+
+    def _collect_neb_directories(self, neb_directory: os.PathLike[str] | str) -> list[str]:
+        """Collect numerically named VASP NEB image directories."""
+        neb_path = os.fspath(neb_directory)
+        image_dirs = []
+        for name in os.listdir(neb_path):
+            full_path = os.path.join(neb_path, name)
+            if os.path.isdir(full_path) and name.isdigit():
+                image_dirs.append(name)
+
+        image_dirs.sort(key=int)
+        if not image_dirs:
+            raise ValueError(f"No numbered image directories found in {neb_path}")
+        return image_dirs
+
+    def build_abo_neb_vasp(
+        self,
+        outfile: os.PathLike[str] | str,
+        neb_directory: os.PathLike[str] | str,
+        lattice_atom_count: int = 0,
+        expand_xy: tuple[int, int] = (1, 1),
+    ) -> None:
+        """
+        Build a legacy ABO trajectory from a VASP NEB calculation.
+
+        For each numbered image directory, only the final ionic step is written.
+        Endpoints are always read from ``POSCAR``.
+        """
+        image_dirs = self._collect_neb_directories(neb_directory)
+
+        with open(outfile, 'wb') as f:
+            f.write(len(image_dirs).to_bytes(2, byteorder='little'))
+
+            for frame_idx, dirname in enumerate(image_dirs, start=1):
+                endpoint = frame_idx == 1 or frame_idx == len(image_dirs)
+                atoms = self._read_vasp_neb_image(os.path.join(neb_directory, dirname), endpoint=endpoint)
+                expanded_atoms = self._expand_lattice_atoms(atoms, lattice_atom_count, expand_xy)
+
+                self._write_frame_header(f, frame_idx, f'NEB image {dirname}')
+                f.write(len(expanded_atoms).to_bytes(2, byteorder='little'))
+                for position, atomic_number in expanded_atoms:
+                    f.write(int(atomic_number).to_bytes(1, byteorder='little'))
+                    f.write(np.array(position, dtype=np.float32).tobytes())
+
+                f.write(int(0).to_bytes(2, byteorder='little'))
+
+        print("Creating file: %s" % outfile)
+        print("Size: %f MB" % (os.stat(outfile).st_size / (1024*1024)))
+
+    def build_abof_neb_vasp_v1(
+        self,
+        outfile: os.PathLike[str] | str,
+        neb_directory: os.PathLike[str] | str,
+        lattice_atom_count: int = 0,
+        expand_xy: tuple[int, int] = (1, 1),
+        flags: int = 0,
+        reaction_event: bool = True,
+    ) -> None:
+        """Build an ABOF v1 trajectory from VASP NEB images."""
+        if reaction_event:
+            flags |= self._REACTION_EVENT_FLAG_BIT
+
+        image_dirs = self._collect_neb_directories(neb_directory)
+        with open(outfile, 'wb') as f:
+            self._write_file_header(f, version=1, flags=flags)
+            f.write(len(image_dirs).to_bytes(2, byteorder='little'))
+
+            for frame_idx, dirname in enumerate(image_dirs, start=1):
+                endpoint = frame_idx == 1 or frame_idx == len(image_dirs)
+                atoms = self._read_vasp_neb_image(os.path.join(neb_directory, dirname), endpoint=endpoint)
+                expanded_atoms = self._expand_lattice_atoms(atoms, lattice_atom_count, expand_xy)
+
+                self._write_frame_header(f, frame_idx, f'NEB image {dirname}')
+                f.write(len(expanded_atoms).to_bytes(2, byteorder='little'))
+                for position, atomic_number in expanded_atoms:
+                    f.write(int(atomic_number).to_bytes(1, byteorder='little'))
+                    f.write(np.array(position, dtype=np.float32).tobytes())
+
+                f.write(int(0).to_bytes(2, byteorder='little'))
+
+        print("Creating file: %s" % outfile)
+        print("Size: %f MB" % (os.stat(outfile).st_size / (1024*1024)))
 
     def build_abo_model(
         self,

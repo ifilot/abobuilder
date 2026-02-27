@@ -87,11 +87,11 @@ This example performs a Hartree-Fock calculation for methane and writes a v1
            geometry_descriptor=desc,
        )
 
-Localized orbitals (Foster–Boys)
+Localized orbitals (Foster-Boys)
 --------------------------------
 
 After computing canonical orbitals, you can localize them using PyQInt's
-Foster–Boys routine and emit a second ``.abo`` file.
+Foster-Boys routine and emit a second ``.abo`` file.
 
 .. code-block:: python
 
@@ -108,7 +108,7 @@ Foster–Boys routine and emit a second ``.abo`` file.
 
    desc = clean_multiline(
        """
-       Foster–Boys localized molecular orbitals for CH4 (STO-3G).
+       Foster-Boys localized molecular orbitals for CH4 (STO-3G).
        Generated with ABO Builder.
        """
    )
@@ -135,3 +135,34 @@ Tips
 * Supply ``occupied_colors`` and ``unoccupied_colors`` when constructing
   ``AboBuilder`` to customize orbital colors.
 * For legacy consumers, ``build_abo_hf_v0`` can be used to emit v0 files.
+
+VASP NEB trajectories
+---------------------
+
+You can also build geometry-only reaction trajectories from a VASP NEB folder
+layout (e.g. ``00`` .. ``09`` image directories). The writer stores only the
+last image from each directory, and always reads endpoints from ``POSCAR``.
+
+.. code-block:: python
+
+   from abobuilder import AboBuilder
+
+   builder = AboBuilder()
+
+   # Legacy .abo file (atoms only, no mesh objects)
+   builder.build_abo_neb_vasp(
+       'neb_path.abo',
+       'my_neb_run',
+       lattice_atom_count=24,  # use -N to expand all except the last N atoms
+       expand_xy=(3, 3),
+   )
+
+   # ABOF v1 variant with the reaction-event header bit enabled.
+   builder.build_abof_neb_vasp_v1('neb_path.abof', 'my_neb_run')
+
+All NEB frames are centered around the unit-cell midpoint ``(0.5, 0.5, 0.5)``
+in direct coordinates before optional lattice expansion.
+
+``expand_xy`` values must be positive odd integers so the expansion can be
+centered around zero (for example ``(3, 3)`` yields offsets ``-1, 0, 1`` in
+both X and Y).
